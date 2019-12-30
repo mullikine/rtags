@@ -2,107 +2,16 @@ import enum
 import json
 import os
 import os.path
-import subprocess as sp
-import sys
-import time
 
 import pytest
+
+import utils
 
 TESTS = None
 TESTS_NAME = None
 
 
-def is_exe(path):
-    if not (os.path.isfile(path) and os.access(path, os.X_OK)):
-        ValueError(path, 'file does not exist or is not executable')
-
-
-class RTags():
-    '''RTags class for rdm/rc tests'''
-
-    try:
-        __rdm_exe = os.path.join(os.environ['RTAGS_BINARY_DIR'], 'rdm')
-        __rc_exe = os.path.join(os.environ['RTAGS_BINARY_DIR'], 'rc')
-        is_exe(__rdm_exe)
-        is_exe(__rc_exe)
-    except KeyError:
-        print('You need to set RTAGS_BINARY_DIR environment variable.', file=sys.stderr)
-        sys.exit(1)
-    except ValueError as err:
-        print(str(err), file=sys.stderr)
-        sys.exit(1)
-
-    __socket_file = '/var/tmp/rdm_dev'
-
-    def __init__(self):
-        self._rdm_p = None
-
-    def rc(self, *args):
-        '''Call rc with args.
-
-        :params *args: Variable argument list, can also contain lists.
-        '''
-        rc_args = [self.__rc_exe, '--socket-file', self.__socket_file]
-
-        for arg in args:
-            if isinstance(arg, list):
-                rc_args += arg
-            else:
-                rc_args.append(arg)
-
-        return sp.check_output(rc_args).decode()
-
-    def parse(self, directory, files):
-        '''Parse files from directory.
-
-        :param directory: The files location
-        :param files: The files to parse
-        '''
-        compile_commands_g = (
-            'clang++ -std=c++11 -I. -c ' + os.path.join(directory, test_file)
-            for test_file in (src_file for src_file in files if src_file.endswith(('.cpp', '.c')))
-        )
-
-        for compile_command in compile_commands_g:
-            self.rc('--project-root', directory, '-c', compile_command)
-
-            # Wait until the file is indexed
-            while True:
-                try:
-                    self.rc('--is-indexing')
-                    break
-                except sp.CalledProcessError:
-                    time.sleep(0.01)
-
-    def rdm(self, data_dir):
-        '''Start rdm.
-
-        :param data_dir: The rdm data directory
-        '''
-        if self._rdm_p:
-            return
-
-        self._rdm_p = sp.Popen(
-            [self.__rdm_exe, '--socket-file', self.__socket_file, '-d', data_dir, '-o', '-B', '--log-flush'],
-            stdout=sp.PIPE,
-            stderr=sp.STDOUT,
-        )
-
-        # Wait until rdm is ready
-        while True:
-            try:
-                self.rc('-w')
-                break
-            except sp.CalledProcessError:
-                time.sleep(0.01)
-
-    def rdm_quit(self):
-        '''Quit rdm.'''
-        self._rdm_p.terminate()
-        self._rdm_p.wait()
-
-
-@pytest.yield_fixture(scope='session', autouse=True)
+@pytest.yield_fixture(scope='module', autouse=True)
 def rtags(tmpdir_factory):
     '''RTags session yield fixture.
 
@@ -111,8 +20,8 @@ def rtags(tmpdir_factory):
 
     :param tmpdir_factory: The tmpdir_factory fixture
     '''
-    rtags = RTags()
-    rtags.rdm(str(tmpdir_factory.mktemp('data_dir')))
+    rtags = utils.RTags('/var/tmp/rdm_dev')
+    rtags.rdm('--data-dir', str(tmpdir_factory.mktemp('data_dir')), '--no-filesystem-watcher', '--log-flush')
     yield rtags
     rtags.rdm_quit()
 
